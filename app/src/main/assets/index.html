@@ -851,15 +851,32 @@
 
       var camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 1000); // viewer: new PerspectiveCamera(50, aspect, 0.01, 1000)
 
-      var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // B项：alpha 透明画布，歌词位于车模后
-      renderer.setClearColor(0x000000, 0); // B项：完全透明，露出 body 深色背景
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.useLegacyLights = false; // 物理光照模式，对应新版 three 默认；Neutral 环境 PointLight 强度 900 依赖此模式
-      renderer.toneMapping = THREE.ACESFilmicToneMapping; // 场景美化：ACES 柔和高光，防天空/车身高光过曝
-      renderer.toneMappingExposure = 0.95; // ACES 下略压高光，亮度由场景参数补偿（防过曝）
-      if (typeof renderer.outputEncoding !== 'undefined') { renderer.outputEncoding = THREE.sRGBEncoding; } // r148 须显式 sRGB 输出（新版本默认）
-      container.appendChild(renderer.domElement);
+      // 针对 820A 优化：关掉抗锯齿，降低计算精度，大幅降低 GPU 发热与掉帧
+var renderer = new THREE.WebGLRenderer({ 
+    antialias: false, 
+    alpha: true,
+    powerPreference: "low-power",
+    precision: "mediump"
+});
+renderer.setClearColor(0x000000, 0);
+
+// 强制锁死像素比为 1，杜绝高分辨率超清渲染
+renderer.setPixelRatio(1.0);
+
+// 渲染分辨率降为 70%（CSS 满屏拉伸，视觉损耗极低，减少一半计算量）
+var scale = 0.7;
+var renderWidth = Math.floor(window.innerWidth * scale);
+var renderHeight = Math.floor(window.innerHeight * scale);
+renderer.setSize(renderWidth, renderHeight, false);
+renderer.domElement.style.width = '100%';
+renderer.domElement.style.height = '100%';
+
+// 保留原有光照设置与色调映射
+renderer.useLegacyLights = false;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+if (typeof renderer.outputEncoding !== 'undefined') { renderer.outputEncoding = THREE.sRGBEncoding; }
+container.appendChild(renderer.domElement);
 
       // ---------- 控制器（旋转 + 缩放），限制仰角避免翻到车底 ----------
       var controls = new OrbitControls(camera, renderer.domElement);
@@ -4508,9 +4525,21 @@
       // ---------- 渲染循环 ----------
       function animate() {
         requestAnimationFrame(animate);
-        // v33：渲染循环整体保护——任一环节异常不得中断 rAF（异常被捕获后下一帧继续渲染，根治“卡死”），
-        // 同时输出 [ANIMATE_ERR] 堆栈到 logcat 供后续精确修复
-        try {
+
+    // ======== 针对 820A 锁 20 帧节流优化 ========
+    var _nowTime = performance.now();
+    if (!window._lastAnimateTime) { window._lastAnimateTime = _nowTime; }
+    var _delta = _nowTime - window._lastAnimateTime;
+    
+    // 50ms 相当于锁定 20 帧（1000ms / 20 = 50ms），未达到 50ms 直接跳过整轮渲染和轮询
+    if (_delta < 50) {
+        return;
+    }
+    window._lastAnimateTime = _nowTime - (_delta % 50);
+    // ===========================================
+
+    // v33: 渲染循环整体保护——任一环节异常不得中断 rAF
+    try {
         if (doorAnimRunning) doorTick(performance.now()); // 方案A：推进车门/前盖/尾箱铰链缓动
         dMapTick(); // v2.x：D档地图过渡动画逐帧推进（NATIVE 原生相机 / Three.js 相机双路径）
         drawFreq();
