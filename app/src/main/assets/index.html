@@ -4535,12 +4535,7 @@ container.appendChild(renderer.domElement);
     if (!window._lastAnimateTime) { window._lastAnimateTime = _nowTime; }
     var _delta = _nowTime - window._lastAnimateTime;
     
-    // 50ms 相当于锁定 20 帧（1000ms / 20 = 50ms），未达到 50ms 直接跳过整轮渲染和轮询
-    if (_delta < 50) {
-        return;
-    }
-    window._lastAnimateTime = _nowTime - (_delta % 50);
-    // ===========================================
+
 
     // v33: 渲染循环整体保护——任一环节异常不得中断 rAF
     try {
@@ -4637,7 +4632,13 @@ container.appendChild(renderer.domElement);
           applyDrawerTransform();
         }
         // 浮窗联动已移除（v3）：不移动相机与车模，OrbitControls 保持自由
-        renderer.render(scene, camera);
+        // 仅对最终 3D 画面渲染做 20 帧控频，保留车门缓动和改色正常接收
+        var _nowRender = performance.now();
+        if (!window._lastRenderTime) { window._lastRenderTime = _nowRender; }
+        if (_nowRender - window._lastRenderTime >= 50) {
+            renderer.render(scene, camera);
+            window._lastRenderTime = _nowRender;
+        }
         } catch (err) {
           if (window.console) console.error('[ANIMATE_ERR] ' + (err && err.message) + ' STACK=' + (err && err.stack ? err.stack.split('\n').slice(0, 8).join(' | ') : ''));
         }
